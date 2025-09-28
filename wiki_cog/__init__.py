@@ -72,6 +72,7 @@ class WikiCog(commands.Cog):
                     params_table = article.find('table')
                     if params_table:
                         final_content += "## Parameters\n"
+                        seen_params = set()
 
                         rows = params_table.find_all('tr')
                         for row in rows:
@@ -80,21 +81,21 @@ class WikiCog(commands.Cog):
                                 param_name = cells[0].get_text().strip()
                                 param_desc = cells[1].get_text().strip()
 
+                                # Clean up parameter descriptions that might contain duplicated content
+                                if ':' in param_desc and param_name in param_desc:
+                                    # If param_desc contains "paramname: description", extract just the description
+                                    parts = param_desc.split(':', 1)
+                                    if len(parts) > 1:
+                                        param_desc = parts[1].strip()
+
                                 if (param_name and param_name != 'Name' and
-                                    param_desc and param_desc != 'Description'):
+                                    param_desc and param_desc != 'Description' and
+                                    param_name not in seen_params and
+                                    len(param_desc) > 5):  # Ensure meaningful description
+                                    seen_params.add(param_name)
                                     final_content += f"- **{param_name}**: {param_desc}\n"
 
                         final_content += '\n'
-
-                    # If no table found, try to parse parameters from text
-                    if not params_table:
-                        article_text = article.get_text()
-                        param_matches = re.findall(r'([a-zA-Z0-9_]+):\s*([^,\n]+)', article_text)
-                        if param_matches and len(param_matches) > 0:
-                            final_content += "## Parameters\n"
-                            for match in param_matches:
-                                final_content += f"- **{match[0].strip()}**: {match[1].strip()}\n"
-                            final_content += '\n'
 
                     # Returns section
                     article_text = article.get_text()
@@ -109,24 +110,15 @@ class WikiCog(commands.Cog):
                             final_content += f"## Returns\n{returns_text}\n\n"
 
                     # Code blocks and examples
-                    code_blocks = article.find_all(['pre', 'code'])
+                    code_blocks = article.find_all('pre')
                     examples_added = False
+                    seen_code_blocks = set()
 
                     for block in code_blocks:
-                        # Skip if this block is inside another block
-                        if block.find_parent(['pre', 'code']):
-                            continue
-
-                        if not examples_added:
-                            final_content += "## Examples\n"
-                            examples_added = True
-
-                        if block.name == 'pre':
-                            code_elem = block.find('code')
-                            if code_elem:
-                                code = code_elem.get_text()
-                            else:
-                                code = block.get_text()
+                        # Get the code content
+                        code_elem = block.find('code')
+                        if code_elem:
+                            code = code_elem.get_text()
                         else:
                             code = block.get_text()
 
@@ -138,17 +130,26 @@ class WikiCog(commands.Cog):
                             cleaned_lines = [re.sub(r'^\s*\d+\s+', '', line) for line in lines]
                             code = '\n'.join(cleaned_lines)
 
+                        # Skip if we've already seen this exact code block
+                        code_hash = hash(code.strip())
+                        if code_hash in seen_code_blocks or not code.strip():
+                            continue
+                        seen_code_blocks.add(code_hash)
+
+                        if not examples_added:
+                            final_content += "## Examples\n"
+                            examples_added = True
+
                         # Determine language
                         language = 'pawn'
-                        if block.get('class'):
-                            classes = block.get('class', [])
+                        if code_elem and code_elem.get('class'):
+                            classes = code_elem.get('class', [])
                             if 'language-c' in classes:
                                 language = 'c'
                             elif 'language-cpp' in classes:
                                 language = 'cpp'
 
-                        if code.strip():
-                            final_content += f"```{language}\n{code}\n```\n\n"
+                        final_content += f"```{language}\n{code}\n```\n\n"
 
                     # Notes section with tips and warnings
                     notes_pattern = re.search(
@@ -529,25 +530,12 @@ class WikiCog(commands.Cog):
 
             await interaction.edit_original_response(embeds=embeds, view=view)
 
-            # Delete the original search message
-            try:
-                if interaction.message:
-                    await interaction.message.delete()
-            except:
-                pass
-
         except Exception as e:
             await interaction.edit_original_response(
                 content=f"An error occurred while retrieving the documentation. Please visit the website directly: {hit['url_without_anchor']}",
                 embeds=[],
                 view=None
             )
-
-            try:
-                if interaction.message:
-                    await interaction.message.delete()
-            except:
-                pass
 
 
 class WikiSearchView(discord.ui.View):
