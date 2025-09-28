@@ -84,8 +84,8 @@ class WikiCog(commands.Cog):
                             for row in rows[1:]:  # Skip header row
                                 cells = row.find_all(['td', 'th'])
                                 if len(cells) >= 2:
-                                    raw_name = cells[0].get_text(separator=' ', strip=True)
-                                    raw_desc = cells[1].get_text(separator=' ', strip=True)
+                                    raw_name = cells[0].get_text(strip=True)
+                                    raw_desc = cells[1].get_text(strip=True)
 
                                     # Skip empty or invalid entries
                                     if not raw_name or not raw_desc or len(raw_desc) < 5:
@@ -133,7 +133,7 @@ class WikiCog(commands.Cog):
                                 if current.name == 'h2':  # Next section
                                     break
                                 elif current.name in ['p', 'div', 'ul']:
-                                    text = current.get_text(separator=' ', strip=True)
+                                    text = current.get_text(strip=True)
                                     if text and len(text) > 3:
                                         returns_content += f"{text}\n\n"
                                         returns_found = True
@@ -269,7 +269,7 @@ class WikiCog(commands.Cog):
                                     for li in current.find_all('li'):
                                         link = li.find('a')
                                         if link:
-                                            func_name = link.get_text(separator=' ', strip=True)
+                                            func_name = link.get_text(strip=True)
                                             func_url = link.get('href', '')
 
                                             if func_name and not any(x in func_name.lower() for x in ['previous', 'next', 'edit']):
@@ -282,7 +282,7 @@ class WikiCog(commands.Cog):
                                                 related_functions_found = True
                                         else:
                                             # No link, just text
-                                            text = li.get_text(separator=' ', strip=True)
+                                            text = li.get_text(strip=True)
                                             if text and not any(x in text.lower() for x in ['previous', 'next', 'edit']):
                                                 final_content += f"- {text}\n"
                                                 related_functions_found = True
@@ -302,7 +302,7 @@ class WikiCog(commands.Cog):
                             in_related_section = False
 
                             for link in all_links:
-                                link_text = link.get_text(separator=' ', strip=True)
+                                link_text = link.get_text(strip=True)
                                 link_url = link.get('href', '')
 
                                 # Check if this link appears to be a function name
@@ -339,7 +339,7 @@ class WikiCog(commands.Cog):
                             if tags_content:
                                 final_content += f"## Tags\n{tags_content}\n"
 
-                    # Clean up the final content
+                    # Clean up the final content - Enhanced cleanup
                     final_content = re.sub(r'\n{3,}', '\n\n', final_content)
                     final_content = re.sub(r'\s+\n', '\n', final_content)
                     final_content = re.sub(r'warning(?!\s*:)', '', final_content, flags=re.IGNORECASE)
@@ -348,6 +348,14 @@ class WikiCog(commands.Cog):
                     final_content = re.sub(r'Edit this page.*$', '', final_content, flags=re.MULTILINE | re.IGNORECASE)
                     final_content = re.sub(r'## Tags\n\s*\n', '', final_content)
                     final_content = re.sub(r'client\.\s*Tags:', 'Tags:', final_content, flags=re.IGNORECASE)
+
+                    # Remove any comma-separated formatting artifacts
+                    final_content = re.sub(r',\s*\n', '\n', final_content)
+                    final_content = re.sub(r'([a-zA-Z]),([a-zA-Z])', r'\1 \2', final_content)
+
+                    # Fix broken markdown formatting
+                    final_content = re.sub(r'(\w+),\s*\n', r'\1\n', final_content)
+
                     final_content = final_content.strip()
 
                     return final_content
