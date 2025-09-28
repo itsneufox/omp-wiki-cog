@@ -71,51 +71,101 @@ class WikiCog(commands.Cog):
                         if description:
                             final_content += f"## Description\n{description}\n\n"
 
-                    # Parameters Table - Simplified and robust parsing
+                    # Parameters Table - Complete rewrite for robustness
                     params_table = article.find('table')
                     if params_table:
                         final_content += "## Parameters\n"
-                        seen_params = set()
 
-                        # Get all rows, skip header
+                        # Collect all parameter data first
+                        param_data = {}
+
                         rows = params_table.find_all('tr')
                         if len(rows) > 1:  # Has header + data rows
                             for row in rows[1:]:  # Skip header row
                                 cells = row.find_all(['td', 'th'])
                                 if len(cells) >= 2:
-                                    # Get parameter name (first column) - preserve original formatting
-                                    param_name = cells[0].get_text(separator=' ', strip=True)
-                                    # Get description (second column) - preserve spaces
-                                    param_desc = cells[1].get_text(separator=' ', strip=True)
+                                    raw_name = cells[0].get_text(separator=' ', strip=True)
+                                    raw_desc = cells[1].get_text(separator=' ', strip=True)
 
-                                    # Clean parameter name - extract just the parameter identifier
-                                    clean_param_name = param_name.split()[0] if param_name.split() else param_name
+                                    # Skip empty or invalid entries
+                                    if not raw_name or not raw_desc or len(raw_desc) < 5:
+                                        continue
 
-                                    # Skip if empty or already seen
-                                    if (clean_param_name and
-                                        len(clean_param_name) > 1 and
-                                        param_desc and
-                                        len(param_desc) > 5 and
-                                        clean_param_name not in seen_params):
+                                    # Clean and extract parameter name
+                                    param_name = raw_name.strip()
 
-                                        seen_params.add(clean_param_name)
-                                        final_content += f"- **{clean_param_name}**: {param_desc}\n"
+                                    # Handle different parameter formats
+                                    if re.match(r'^\w+$', param_name):
+                                        # Simple parameter like "playerid"
+                                        clean_name = param_name
+                                    elif 'const' in param_name.lower() and '[' in param_name:
+                                        # Array parameter like "const name[]"
+                                        clean_name = param_name
+                                    elif '[' in param_name and ']' in param_name:
+                                        # Array without const like "name[]"
+                                        clean_name = param_name
+                                    else:
+                                        # Multi-word parameter, take the last word as the main identifier
+                                        words = param_name.split()
+                                        clean_name = words[-1] if words else param_name
+
+                                    # Store unique parameters only
+                                    if clean_name not in param_data:
+                                        param_data[clean_name] = raw_desc
+
+                        # Output parameters in a consistent order
+                        for param_name, param_desc in param_data.items():
+                            final_content += f"- **{param_name}**: {param_desc}\n"
 
                         final_content += '\n'
 
-                    # Returns section - Simplified parsing
-                    returns_pattern = re.search(
-                        r'## Returns\s*([\s\S]*?)(?=## Examples|## Notes|## Related|$)',
-                        article_text,
-                        re.IGNORECASE
-                    )
-                    if returns_pattern and returns_pattern.group(1):
-                        returns_text = returns_pattern.group(1).strip()
-                        if returns_text and len(returns_text) > 5:
-                            # Clean up the returns text
-                            returns_text = re.sub(r'\s+', ' ', returns_text)  # Normalize whitespace
-                            returns_text = re.sub(r'\*\*(\d+)\*\*', r'**\1**', returns_text)  # Preserve bold numbers
-                            final_content += f"## Returns\n{returns_text}\n\n"
+                    # Returns section - Multiple parsing approaches
+                    returns_found = False
+
+                    # Try DOM-based parsing first
+                    returns_h2 = article.find('h2', string=re.compile(r'Returns', re.IGNORECASE))
+                    if returns_h2:
+                        returns_content = ""
+                        current = returns_h2.next_sibling
+
+                        while current and not returns_found:
+                            if hasattr(current, 'name'):
+                                if current.name == 'h2':  # Next section
+                                    break
+                                elif current.name in ['p', 'div', 'ul']:
+                                    text = current.get_text(separator=' ', strip=True)
+                                    if text and len(text) > 3:
+                                        returns_content += f"{text}\n\n"
+                                        returns_found = True
+                            current = current.next_sibling
+
+                        if returns_content.strip():
+                            final_content += f"## Returns\n{returns_content.strip()}\n\n"
+
+                    # Fallback: enhanced regex pattern matching
+                    if not returns_found:
+                        returns_patterns = [
+                            r'## Returns\s*([\s\S]*?)(?=## Examples|## Notes|## Related|$)',
+                            r'Returns\s*([\s\S]*?)(?=## Examples|## Notes|## Related|Examples|Notes|Related|$)',
+                            r'Returns[:\s]*([\s\S]*?)(?=Examples|Notes|Related Functions|Tags|$)',
+                            # More specific patterns for common return value formats
+                            r'(?:## )?Returns?[:\s]*\n((?:\s*[-*]?\s*\*?\*?\d+\*?\*?\s*[^\n]*\n?)+)',
+                            r'(?:## )?Returns?[:\s]*\n((?:\s*\*?\*?\d+\*?\*?[^\n]*\n?)+)'
+                        ]
+
+                        for pattern in returns_patterns:
+                            returns_match = re.search(pattern, article_text, re.IGNORECASE | re.MULTILINE)
+                            if returns_match and returns_match.group(1):
+                                returns_text = returns_match.group(1).strip()
+                                if returns_text and len(returns_text) > 10:
+                                    # Clean up the returns text
+                                    returns_text = re.sub(r'\s+', ' ', returns_text)
+                                    # Handle common return value formatting
+                                    returns_text = re.sub(r'(\d+)\s*-\s*', r'**\1** - ', returns_text)
+                                    returns_text = re.sub(r'\*\*(\d+)\*\*', r'**\1**', returns_text)
+                                    final_content += f"## Returns\n{returns_text}\n\n"
+                                    returns_found = True
+                                    break
 
                     # Code blocks and examples
                     code_blocks = article.find_all('pre')
@@ -202,11 +252,12 @@ class WikiCog(commands.Cog):
                     if related_callbacks_pattern and related_callbacks_pattern.group(1):
                         final_content += f"## Related Callbacks\n{related_callbacks_pattern.group(1).strip()}\n\n"
 
-                    # Related Functions - Improved parsing
+                    # Related Functions - Multiple parsing approaches
+                    related_functions_found = False
+
+                    # Try DOM-based parsing first
                     related_functions_section = article.find('h2', string=re.compile(r'Related Functions', re.IGNORECASE))
                     if related_functions_section:
-                        final_content += "## Related Functions\n"
-
                         # Find the list after the Related Functions header
                         current = related_functions_section.next_sibling
                         while current:
@@ -214,6 +265,7 @@ class WikiCog(commands.Cog):
                                 if current.name == 'h2':  # Next section
                                     break
                                 elif current.name == 'ul':  # Found the list
+                                    final_content += "## Related Functions\n"
                                     for li in current.find_all('li'):
                                         link = li.find('a')
                                         if link:
@@ -227,14 +279,49 @@ class WikiCog(commands.Cog):
                                                     final_content += f"- [{func_name}]({func_url})\n"
                                                 else:
                                                     final_content += f"- {func_name}\n"
+                                                related_functions_found = True
                                         else:
                                             # No link, just text
                                             text = li.get_text(separator=' ', strip=True)
                                             if text and not any(x in text.lower() for x in ['previous', 'next', 'edit']):
                                                 final_content += f"- {text}\n"
+                                                related_functions_found = True
                                     break
                             current = current.next_sibling
 
+                    # Fallback: try to find all links in the Related Functions area
+                    if not related_functions_found:
+                        related_pattern = re.search(
+                            r'Related Functions\s*([\s\S]*?)(?=Related Callbacks|Tags|$)',
+                            article_text,
+                            re.IGNORECASE
+                        )
+                        if related_pattern:
+                            # Find all links in the article after "Related Functions"
+                            all_links = article.find_all('a')
+                            in_related_section = False
+
+                            for link in all_links:
+                                link_text = link.get_text(separator=' ', strip=True)
+                                link_url = link.get('href', '')
+
+                                # Check if this link appears to be a function name
+                                if (link_text and
+                                    not any(x in link_text.lower() for x in ['previous', 'next', 'edit', 'home']) and
+                                    re.match(r'^[A-Z][a-zA-Z0-9_]*$', link_text.replace(' ', ''))):
+
+                                    if not related_functions_found:
+                                        final_content += "## Related Functions\n"
+                                        related_functions_found = True
+
+                                    if link_url and not link_url.startswith('http'):
+                                        link_url = f"https://open.mp{link_url}"
+                                    if link_url:
+                                        final_content += f"- [{link_text}]({link_url})\n"
+                                    else:
+                                        final_content += f"- {link_text}\n"
+
+                    if related_functions_found:
                         final_content += '\n'
 
                     # Tags
