@@ -83,13 +83,13 @@ class WikiCog(commands.Cog):
                             for row in rows[1:]:  # Skip header row
                                 cells = row.find_all(['td', 'th'])
                                 if len(cells) >= 2:
-                                    # Get parameter name (first column)
-                                    param_name = cells[0].get_text().strip()
-                                    # Get description (second column)
-                                    param_desc = cells[1].get_text().strip()
+                                    # Get parameter name (first column) - preserve original formatting
+                                    param_name = cells[0].get_text(separator=' ', strip=True)
+                                    # Get description (second column) - preserve spaces
+                                    param_desc = cells[1].get_text(separator=' ', strip=True)
 
-                                    # Clean parameter name - keep only valid characters
-                                    clean_param_name = re.sub(r'[^a-zA-Z0-9_\[\]]+', '', param_name)
+                                    # Clean parameter name - extract just the parameter identifier
+                                    clean_param_name = param_name.split()[0] if param_name.split() else param_name
 
                                     # Skip if empty or already seen
                                     if (clean_param_name and
@@ -103,32 +103,19 @@ class WikiCog(commands.Cog):
 
                         final_content += '\n'
 
-                    # Returns section - Enhanced parsing
-                    returns_section = article.find('h2', string=re.compile(r'Returns', re.IGNORECASE))
-                    if returns_section:
-                        returns_content = ""
-                        current = returns_section.next_sibling
-
-                        # Collect content until next h2 or end
-                        while current and (not hasattr(current, 'name') or current.name != 'h2'):
-                            if hasattr(current, 'get_text'):
-                                text = current.get_text().strip()
-                                if text and len(text) > 3:
-                                    # Format return values with proper line breaks
-                                    if current.name in ['p', 'div']:
-                                        returns_content += f"{text}\n\n"
-                                    elif current.name == 'ul':
-                                        for li in current.find_all('li'):
-                                            li_text = li.get_text().strip()
-                                            if li_text:
-                                                returns_content += f"- {li_text}\n"
-                                        returns_content += "\n"
-                                    else:
-                                        returns_content += f"{text}\n"
-                            current = current.next_sibling
-
-                        if returns_content.strip():
-                            final_content += f"## Returns\n{returns_content.strip()}\n\n"
+                    # Returns section - Simplified parsing
+                    returns_pattern = re.search(
+                        r'## Returns\s*([\s\S]*?)(?=## Examples|## Notes|## Related|$)',
+                        article_text,
+                        re.IGNORECASE
+                    )
+                    if returns_pattern and returns_pattern.group(1):
+                        returns_text = returns_pattern.group(1).strip()
+                        if returns_text and len(returns_text) > 5:
+                            # Clean up the returns text
+                            returns_text = re.sub(r'\s+', ' ', returns_text)  # Normalize whitespace
+                            returns_text = re.sub(r'\*\*(\d+)\*\*', r'**\1**', returns_text)  # Preserve bold numbers
+                            final_content += f"## Returns\n{returns_text}\n\n"
 
                     # Code blocks and examples
                     code_blocks = article.find_all('pre')
@@ -215,42 +202,38 @@ class WikiCog(commands.Cog):
                     if related_callbacks_pattern and related_callbacks_pattern.group(1):
                         final_content += f"## Related Callbacks\n{related_callbacks_pattern.group(1).strip()}\n\n"
 
-                    # Related Functions
-                    related_functions_pattern = re.search(
-                        r'Related Functions[,\s]*([\s\S]*?)(?=Related Callbacks|Tags|$)',
-                        article_text,
-                        re.IGNORECASE
-                    )
-                    if related_functions_pattern and related_functions_pattern.group(1):
+                    # Related Functions - Improved parsing
+                    related_functions_section = article.find('h2', string=re.compile(r'Related Functions', re.IGNORECASE))
+                    if related_functions_section:
                         final_content += "## Related Functions\n"
 
-                        # Try to find function links in the related section
-                        related_section = article.find('h2', string=re.compile(r'Related Functions', re.IGNORECASE))
-                        if related_section:
-                            next_section = related_section.find_next_sibling(['h2', 'h3'])
-                            elements = []
-                            for sibling in related_section.next_siblings:
-                                if sibling == next_section:
+                        # Find the list after the Related Functions header
+                        current = related_functions_section.next_sibling
+                        while current:
+                            if hasattr(current, 'name'):
+                                if current.name == 'h2':  # Next section
                                     break
-                                if hasattr(sibling, 'find_all'):
-                                    elements.extend(sibling.find_all('a'))
+                                elif current.name == 'ul':  # Found the list
+                                    for li in current.find_all('li'):
+                                        link = li.find('a')
+                                        if link:
+                                            func_name = link.get_text(separator=' ', strip=True)
+                                            func_url = link.get('href', '')
 
-                            for link in elements:
-                                func_name = link.get_text().strip()
-                                func_url = link.get('href')
-
-                                if (func_name and func_url and
-                                    'Previous' not in func_name and 'Next' not in func_name):
-                                    if not func_url.startswith('http'):
-                                        func_url = f"https://open.mp{func_url}"
-                                    final_content += f"- [{func_name}]({func_url})\n"
-
-                        # If no links found, try to extract function names from text
-                        if "- [" not in final_content.split("## Related Functions")[-1]:
-                            related_funcs = re.findall(r'([A-Z][a-zA-Z0-9]+)', related_functions_pattern.group(1))
-                            if related_funcs:
-                                for func in related_funcs:
-                                    final_content += f"- {func}\n"
+                                            if func_name and not any(x in func_name.lower() for x in ['previous', 'next', 'edit']):
+                                                if func_url and not func_url.startswith('http'):
+                                                    func_url = f"https://open.mp{func_url}"
+                                                if func_url:
+                                                    final_content += f"- [{func_name}]({func_url})\n"
+                                                else:
+                                                    final_content += f"- {func_name}\n"
+                                        else:
+                                            # No link, just text
+                                            text = li.get_text(separator=' ', strip=True)
+                                            if text and not any(x in text.lower() for x in ['previous', 'next', 'edit']):
+                                                final_content += f"- {text}\n"
+                                    break
+                            current = current.next_sibling
 
                         final_content += '\n'
 
