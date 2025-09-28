@@ -61,6 +61,9 @@ class WikiCog(commands.Cog):
                     if not article:
                         return "Could not find article content."
 
+                    # Get article text for pattern matching
+                    article_text = article.get_text()
+
                     # Description
                     desc_elem = article.find('p')
                     if desc_elem:
