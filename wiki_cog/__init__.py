@@ -68,46 +68,64 @@ class WikiCog(commands.Cog):
                         if description:
                             final_content += f"## Description\n{description}\n\n"
 
-                    # Parameters Table
+                    # Parameters Table - Simplified and robust parsing
                     params_table = article.find('table')
                     if params_table:
                         final_content += "## Parameters\n"
                         seen_params = set()
 
+                        # Get all rows, skip header
                         rows = params_table.find_all('tr')
-                        for row in rows:
-                            cells = row.find_all(['td', 'th'])
-                            if len(cells) >= 2:
-                                param_name = cells[0].get_text().strip()
-                                param_desc = cells[1].get_text().strip()
+                        if len(rows) > 1:  # Has header + data rows
+                            for row in rows[1:]:  # Skip header row
+                                cells = row.find_all(['td', 'th'])
+                                if len(cells) >= 2:
+                                    # Get parameter name (first column)
+                                    param_name = cells[0].get_text().strip()
+                                    # Get description (second column)
+                                    param_desc = cells[1].get_text().strip()
 
-                                # Clean up parameter descriptions that might contain duplicated content
-                                if ':' in param_desc and param_name in param_desc:
-                                    # If param_desc contains "paramname: description", extract just the description
-                                    parts = param_desc.split(':', 1)
-                                    if len(parts) > 1:
-                                        param_desc = parts[1].strip()
+                                    # Clean parameter name - keep only valid characters
+                                    clean_param_name = re.sub(r'[^a-zA-Z0-9_\[\]]+', '', param_name)
 
-                                if (param_name and param_name != 'Name' and
-                                    param_desc and param_desc != 'Description' and
-                                    param_name not in seen_params and
-                                    len(param_desc) > 5):  # Ensure meaningful description
-                                    seen_params.add(param_name)
-                                    final_content += f"- **{param_name}**: {param_desc}\n"
+                                    # Skip if empty or already seen
+                                    if (clean_param_name and
+                                        len(clean_param_name) > 1 and
+                                        param_desc and
+                                        len(param_desc) > 5 and
+                                        clean_param_name not in seen_params):
+
+                                        seen_params.add(clean_param_name)
+                                        final_content += f"- **{clean_param_name}**: {param_desc}\n"
 
                         final_content += '\n'
 
-                    # Returns section
-                    article_text = article.get_text()
-                    returns_pattern = re.search(
-                        r'Returns[,\s]*([\s\S]*?)(?=Examples|Notes|Related Functions|Related Callbacks|$)',
-                        article_text,
-                        re.IGNORECASE
-                    )
-                    if returns_pattern and returns_pattern.group(1):
-                        returns_text = returns_pattern.group(1).strip()
-                        if returns_text:
-                            final_content += f"## Returns\n{returns_text}\n\n"
+                    # Returns section - Enhanced parsing
+                    returns_section = article.find('h2', string=re.compile(r'Returns', re.IGNORECASE))
+                    if returns_section:
+                        returns_content = ""
+                        current = returns_section.next_sibling
+
+                        # Collect content until next h2 or end
+                        while current and (not hasattr(current, 'name') or current.name != 'h2'):
+                            if hasattr(current, 'get_text'):
+                                text = current.get_text().strip()
+                                if text and len(text) > 3:
+                                    # Format return values with proper line breaks
+                                    if current.name in ['p', 'div']:
+                                        returns_content += f"{text}\n\n"
+                                    elif current.name == 'ul':
+                                        for li in current.find_all('li'):
+                                            li_text = li.get_text().strip()
+                                            if li_text:
+                                                returns_content += f"- {li_text}\n"
+                                        returns_content += "\n"
+                                    else:
+                                        returns_content += f"{text}\n"
+                            current = current.next_sibling
+
+                        if returns_content.strip():
+                            final_content += f"## Returns\n{returns_content.strip()}\n\n"
 
                     # Code blocks and examples
                     code_blocks = article.find_all('pre')
