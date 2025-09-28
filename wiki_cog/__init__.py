@@ -12,34 +12,27 @@ from bs4 import BeautifulSoup
 import html
 
 class WikiCog(commands.Cog):
-    """Wiki search cog for open.mp documentation"""
 
     def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=1234567890)
         
-        # Algolia search configuration
         self.algolia_app_id = "AOKXGK39Z7"
         self.algolia_api_key = "54204f37e5c8fc2871052d595ee0505e"
         self.algolia_index_name = "open"
-        
 
     def truncate_text(self, text: str, max_length: int) -> str:
-        """Truncate text to max length"""
         if len(text) <= max_length:
             return text
         return text[:text.rfind(' ', max_length)] + ' ...'
 
     def format_description(self, content: str) -> str:
-        """Format description by replacing mark tags"""
         return content.replace('<mark>', '**').replace('</mark>', '**')
 
     def decode_html_entities(self, text: str) -> str:
-        """Decode HTML entities"""
         return html.unescape(text)
 
     async def parse_openmp_doc_content(self, url: str) -> str:
-        """Parse OpenMP documentation content from URL"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
@@ -146,7 +139,6 @@ class WikiCog(commands.Cog):
             return f"Error fetching content: {str(e)}"
 
     async def search_documentation(self, query: str, language: str = "en") -> List[Dict[str, Any]]:
-        """Search the documentation using Algolia"""
         try:
             search_data = {
                 "params": f"hitsPerPage=20&filters=language:{language}",
@@ -161,7 +153,8 @@ class WikiCog(commands.Cog):
             
             url = f"https://{self.algolia_app_id}-dsn.algolia.net/1/indexes/{self.algolia_index_name}/query"
             
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, json=search_data, headers=headers) as response:
                     if response.status != 200:
                         return []
@@ -169,25 +162,35 @@ class WikiCog(commands.Cog):
                     data = await response.json()
                     return data.get('hits', [])
                     
+        except asyncio.TimeoutError:
+            return []
+        except aiohttp.ClientError:
+            return []
         except Exception as e:
-            print(f"Error searching documentation: {e}")
             return []
 
-    @commands.command(name="wiki")
-    async def wiki_search(self, ctx: commands.Context, *, search_term: str):
-        """Search the open.mp wiki documentation"""
+    @commands.command()
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def wiki(self, ctx: commands.Context, *, search_term: str):
         if len(search_term) < 3:
-            await ctx.send("Query must be 3 characters or more")
+            embed = discord.Embed(
+                title="Search Error",
+                description="Query must be 3 characters or more.",
+                color=0xff0000
+            )
+            await ctx.send(embed=embed)
             return
         
-        language = "en"
-        results = await self.search_documentation(search_term, language)
+        
+        async with ctx.typing():
+            language = "en"
+            results = await self.search_documentation(search_term, language)
         
         if not results:
             embed = discord.Embed(
-                title=f"No results: {search_term}",
-                description="There were no results for that query.",
-                color=0x0099ff
+                title=f"No results found for: {search_term}",
+                description="There were no results for that query. Try a different search term.",
+                color=0xff9900
             )
             await ctx.send(embed=embed)
             return
@@ -303,8 +306,24 @@ class WikiCog(commands.Cog):
             await ctx.send(embed=embed)
 
 
-    @commands.command(name="wikisetup")
+    @commands.command()
     @commands.is_owner()
-    async def wiki_setup(self, ctx: commands.Context):
-        """Setup the wiki cog configuration"""
-        await ctx.send("Wiki cog setup complete! Use `[p]wiki <search term>` to search the documentation.")
+    async def wikisetup(self, ctx: commands.Context):
+        embed = discord.Embed(
+            title="Wiki Cog Setup",
+            description="Wiki cog is ready to use! No additional configuration needed.",
+            color=0x00ff00
+        )
+        embed.add_field(
+            name="Current Configuration",
+            value=f"• **App ID**: {self.algolia_app_id}\n"
+                  f"• **Index Name**: {self.algolia_index_name}\n"
+                  f"• **API Key**: Configured",
+            inline=False
+        )
+        embed.add_field(
+            name="Usage",
+            value="Use `[p]wiki <search term>` to search the open.mp documentation.",
+            inline=False
+        )
+        await ctx.send(embed=embed)

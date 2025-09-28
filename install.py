@@ -72,8 +72,8 @@ def install_cog():
         print("\nNext steps:")
         print("1. Start your Red bot")
         print("2. Load the cog: [p]load wiki_cog")
-        print("3. Configure role IDs in the cog file if needed")
-        print("4. Test with: [p]wiki GetPlayerName")
+        print("3. Test with: [p]wiki GetPlayerName")
+        print("\nNote: The cog is ready to use.")
         
         return True
         

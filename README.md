@@ -36,7 +36,12 @@ Then load: `[p]load wiki_cog`
 
 ## Configuration
 
-No configuration needed! The cog works out of the box with English documentation.
+No configuration needed! The cog works out of the box.
+
+You can check the current configuration with:
+```
+[p]wikisetup
+```
 
 ## Usage
 
@@ -88,7 +93,7 @@ The cog intelligently parses documentation pages to extract:
 
 ### API Configuration
 
-The cog uses the following Algolia configuration:
+The cog uses Algolia search API with the following configuration:
 - App ID: `AOKXGK39Z7`
 - Index: `open`
 - API Key: `54204f37e5c8fc2871052d595ee0505e`
